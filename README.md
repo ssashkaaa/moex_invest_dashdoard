@@ -8,7 +8,7 @@
 6. Оценить устойчивость своего инвестиционного портфеля к кризисным ситуациям через стресс-тестирование.
    
 <!--Как запустить проект?-->
-У вас должны быть установлены [зависимости проекта](https://github.com/ssashkaaa/moex_invest_dashdoard/requirements.txt)
+У вас должны быть установлены [зависимости проекта](https://github.com/ssashkaaa/moex_invest_dashdoard/blob/main/requirements.txt)
 1. Клонирование репозитория
 ```git clone https://github.com/ssashkaaa/moex_invest_dashdoard.git```
 2. Установка зависимостей
