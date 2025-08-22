@@ -103,6 +103,7 @@ if not securities_df.empty:
         
         st.header("1. Ключевые показатели портфеля")
         st.divider()
+        st.write("В данном разделе представлены основные метрики эффективности вашего портфеля за выбранный период.")
 
         returns = portfolio_df.pct_change().dropna()
         if returns.empty:
@@ -137,9 +138,20 @@ if not securities_df.empty:
         col3.metric("Коэффициент Шарпа", f"{sharpe_ratio:.2f}", help="Оценка доходности на единицу риска.")
         col4.metric("Коэффициент Сортино", f"{sortino_ratio:.2f}", help="Оценка доходности, учитывающая только риск падения.")
         col5.metric("Бета", f"{beta:.2f}" if not np.isnan(beta) else "Недоступно", help="Волатильность портфеля относительно рынка.")
+        
+        # --- Новый блок: Интерпретация ключевых метрик ---
+        st.subheader("Автоматические выводы")
+        
+        if sharpe_ratio > 1:
+            st.success(f"**Высокий коэффициент Шарпа ({sharpe_ratio:.2f}).** Ваш портфель показывает хорошую доходность по сравнению с принятым риском. Это означает, что он эффективен.")
+        elif sharpe_ratio > 0:
+            st.info(f"**Умеренный коэффициент Шарпа ({sharpe_ratio:.2f}).** Ваш портфель приносит доходность, которая оправдывает взятый риск.")
+        else:
+            st.warning(f"**Низкий коэффициент Шарпа ({sharpe_ratio:.2f}).** Доходность вашего портфеля не покрывает риск, возможно, стоит пересмотреть его состав.")
 
         st.header("2. Динамика и сравнение с рынком")
         st.divider()
+        st.write("Сравнение кумулятивной доходности вашего портфеля с динамикой рыночного индекса.")
         
         cumulative = (1 + weighted_returns).cumprod()
         if not imoex_df.empty:
@@ -155,9 +167,18 @@ if not securities_df.empty:
                 legend_title_text='Кривая'
             )
             st.plotly_chart(fig_cum, use_container_width=True)
+            
+            # --- Новый блок: Анализ превосходства над рынком ---
+            st.subheader("Сравнение с рынком")
+            if total_return > (imoex_cum.iloc[-1] - 1):
+                st.success(f"**Ваш портфель превзошел рыночный индекс.** Общая доходность портфеля составила {total_return:.2%}, тогда как доходность индекса — {(imoex_cum.iloc[-1] - 1):.2%}. Это показывает эффективность вашей инвестиционной стратегии.")
+            else:
+                st.info(f"**Ваш портфель отстает от рыночного индекса.** Общая доходность портфеля составила {total_return:.2%}, тогда как доходность индекса — {(imoex_cum.iloc[-1] - 1):.2%}. Это может говорить о необходимости более широкой диверсификации или изменения стратегии.")
+
 
         st.header("3. Оптимизация портфеля")
         st.divider()
+        st.write("На графике 'Граница эффективности' представлены портфели с наилучшим соотношением риска и доходности. Звезда (*) показывает оптимальный портфель с максимальным коэффициентом Шарпа.")
         if returns.shape[1] > 1:
             num_portfolios = 5000
             all_weights = np.zeros((num_portfolios, len(tickers)))
@@ -210,10 +231,30 @@ if not securities_df.empty:
                 'Вес': [f"{w:.2%}" for w in max_sharpe_weights]
             })
             st.dataframe(optimal_weights_df, hide_index=True)
-        
-        # --- 3. Прогноз: Что может произойти? ---
-        st.header("4. Прогноз и оценка риска")
+            
+            # --- Новый блок: Анализ корреляции ---
+            st.header("4. Анализ корреляции активов")
+            st.divider()
+            
+            corr = returns.corr()
+            fig_corr = px.imshow(
+                corr, text_auto=True, color_continuous_scale=[(0, COLOR_SECONDARY), (0.5, "white"), (1, COLOR_PRIMARY)],
+                aspect="auto", title="Матрица корреляции доходностей", template="plotly_white"
+            )
+            fig_corr.update_layout(xaxis_title="Активы", yaxis_title="Активы")
+            st.plotly_chart(fig_corr, use_container_width=True)
+
+            st.subheader("Выводы по корреляции")
+            if corr.min().min() > 0.5:
+                st.warning("**Сильная корреляция.** Активы вашего портфеля движутся в одном направлении. Это означает, что портфель может быть менее устойчив к падениям, так как все активы могут падать одновременно.")
+            elif corr.max().max() < 0.2:
+                st.success("**Низкая корреляция.** Ваши активы слабо коррелируют или имеют отрицательную корреляцию, что является признаком хорошей диверсификации. Это снижает общий риск портфеля, так как падение одного актива может компенсироваться ростом другого.")
+            else:
+                st.info("**Умеренная корреляция.** Портфель обладает умеренной диверсификацией. Это обеспечивает баланс между риском и доходностью.")
+
+        st.header("5. Прогнозирование будущей стоимости")
         st.divider()
+        st.write("В данном разделе прогнозируется диапазон возможных исходов стоимости портфеля за счёт симуляции Монте-Карло.")
 
         initial_investment = st.number_input("Начальная сумма инвестиций (в ₽):", min_value=1000, value=100000, step=1000)
         num_simulations = st.slider("Количество симуляций:", min_value=100, max_value=5000, value=1000)
@@ -235,7 +276,7 @@ if not securities_df.empty:
             simulated_end_prices.append(future_portfolio_value)
         simulated_end_prices = np.array(simulated_end_prices)
         
-        st.subheader("Прогнозируемое распределение стоимости")
+        st.subheader("Результаты симуляции")
         mean_end_price = np.mean(simulated_end_prices)
         median_end_price = np.median(simulated_end_prices)
         
@@ -253,17 +294,16 @@ if not securities_df.empty:
         fig_sim.add_vline(x=mean_end_price, line_dash="dash", line_color=COLOR_SECONDARY, annotation_text="Среднее", annotation_position="top left")
         fig_sim.add_vline(x=var_value, line_dash="dash", line_color=COLOR_TEXT, annotation_text="95% VaR", annotation_position="top right")
         fig_sim.update_layout(
-            title=f"Прогноз стоимости портфеля на {time_horizon} дней (по результатам {num_simulations} симуляций)",
+            title=f"Прогноз стоимости портфеля на {time_horizon} дней",
             xaxis_title="Стоимость портфеля (₽)",
             yaxis_title="Количество симуляций",
             bargap=0.1
         )
         st.plotly_chart(fig_sim, use_container_width=True)
 
-        st.header("5. Проверка на прочность (Стресс-тест)")
+        st.header("6. Анализ устойчивости (Стресс-тест)")
         st.divider()
-
-        st.markdown("Оцените, как ваш портфель поведет себя в условиях **повышенной рыночной волатильности**, которая в два раза выше исторической.")
+        st.write("Оценка поведения портфеля в условиях повышенной рыночной волатильности.")
         
         volatility_factor = 2.0
         simulated_stress_prices = []
