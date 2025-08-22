@@ -350,7 +350,7 @@ if not securities_df.empty:
             legend_title_text='Сценарий')
         st.plotly_chart(fig_stress, use_container_width=True)
 
-        st.subheader("Выводы по стресс-тестированию")
+        st.subheader("Результаты стресс-тестирования")
         col_stress1, col_stress2 = st.columns(2)
         col_stress1.metric("Средний результат (Стресс-сценарий)", f"{mean_stress_price:,.2f} ₽", delta=f"{mean_stress_price - mean_end_price:,.2f} ₽")
         col_stress2.metric("95% Value at Risk (Стресс-сценарий)", f"{var_stress:,.2f} ₽", delta=f"{var_stress - var_value:,.2f} ₽")
