@@ -39,7 +39,7 @@ def get_securities(): #функция, которая загружает спи�
 
 
 @st.cache_data(ttl=3600)
-def get_history(ticker, start, end): #функция для получения исторических данных по конкретной акции за указанный период
+def get_history(ticker, start, end, board='TQBR'): #функция для получения исторических данных по конкретной акции за указанный период
     with requests.Session() as session:
         try:
             data = apimoex.get_market_candles(session, security=ticker, interval=24, start=start, end=end) #дневные свечи
@@ -58,7 +58,7 @@ if not securities_df.empty:
     ticker_to_name = dict(zip(securities_df['SECID'], securities_df['SHORTNAME']))
     
     tickers = st.sidebar.multiselect(
-        "Выберите акции для портфеля (до 5 штук)",
+        "Выберите акции для вашего инвестиционного портфеля",
         options=list(ticker_to_name.keys()),
         format_func=lambda x: f"{x} ({ticker_to_name.get(x, 'N/A')})",
         default=securities_df['SECID'][:2].tolist() if not securities_df.empty else []) #пользователь выбирает тикеры 
@@ -108,7 +108,7 @@ if not securities_df.empty:
             st.error("Недостаточно данных для выбранных акций или периода. Пожалуйста, измените выбор.")
             st.stop()
         
-        imoex_df = get_history('IMOEX', start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d')) #загружаем исторические данные по IMOEX - для сравнения с выбранным пользователем инвестиционным портфелем
+        imoex_df = get_history('IMOEX', start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'), board='IME') #загружаем данные по IMOEX - для сравнения с выбранным пользователем инвестиционным портфелем
         
 
         # Ключевые показатели портфеля
