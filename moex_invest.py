@@ -17,7 +17,7 @@ back_color = "#FFFFFF"
 text_color = "#4D4D4D"
 
 st.set_page_config(layout="wide")
-st.title("Интерактивный анализ инвестиционного портфеля")
+st.title("Дашборд для анализа и прогнозирования доходности инвестиционного портфеля")
 #st.markdown("---")
 
 
@@ -58,7 +58,7 @@ def get_history(ticker, start, end): #функция для получения �
 
 securities_df = get_securities() #получаем список тикеров и работаем с ним, если он не пустой
 if not securities_df.empty:
-    st.sidebar.header("Параметры симуляции")
+    st.sidebar.header("Инвестиционный портфель")
     ticker_to_name = dict(zip(securities_df['SECID'], securities_df['SHORTNAME']))
     
     tickers = st.sidebar.multiselect(
@@ -210,7 +210,7 @@ if not securities_df.empty:
             fig_opt = go.Figure(layout=go.Layout(template="plotly_dark"))
             fig_opt.add_trace(go.Scatter(
                 x=vol_arr, y=ret_arr, mode='markers',
-                marker=dict(color=sharpe_arr, colorscale='Reds', showscale=True, colorbar=dict(title="Коэффициент Шарпа")),
+                marker=dict(color=sharpe_arr, colorscale='Reds', showscale=True, colorbar=dict(title="Коэфф. Шарпа")),
                 name='Случайные портфели'))
             
             fig_opt.add_trace(go.Scatter(
