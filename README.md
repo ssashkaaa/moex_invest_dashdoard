@@ -10,7 +10,7 @@
 <!--Как запустить проект?-->
 У вас должны быть установлены [зависимости проекта](https://github.com/ssashkaaa/moex_invest_dashdoard/requirements.txt)
 1. Клонирование репозитория
-```git clone https://github.com/ssashkaaa/moex_invest.git```
+```git clone https://github.com/ssashkaaa/moex_invest_dashdoard.git```
 2. Установка зависимостей
 ```pip3 install -r requirements.txt```
 3. Запуск приложения
