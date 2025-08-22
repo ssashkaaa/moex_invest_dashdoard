@@ -57,7 +57,6 @@ securities_df = get_securities()
 
 if not securities_df.empty:
     st.sidebar.header("Параметры симуляции")
-    # Создаем словарь для отображения полного названия
     ticker_to_name = dict(zip(securities_df['SECID'], securities_df['SHORTNAME']))
     
     tickers = st.sidebar.multiselect(
@@ -70,37 +69,30 @@ if not securities_df.empty:
     weights = []
     if tickers:
         st.sidebar.write("Задайте доли для каждой акции:")
+        # Инициализация весов в session_state, если их нет
         if 'weights' not in st.session_state or len(st.session_state.weights) != len(tickers):
-            st.session_state.weights = [1.0 / len(tickers)] * len(tickers)
+            st.session_state.weights = {ticker: 1.0 / len(tickers) for ticker in tickers}
 
-        def update_weights(changed_index, new_value):
-            total_remaining = 1.0 - new_value
-            if len(tickers) > 1 and total_remaining >= 0:
-                other_indices = [i for i in range(len(tickers)) if i != changed_index]
-                if other_indices:
-                    current_sum_others = sum(st.session_state.weights[i] for i in other_indices)
-                    if current_sum_others > 0:
-                        for i in other_indices:
-                            st.session_state.weights[i] = st.session_state.weights[i] / current_sum_others * total_remaining
-                    else:
-                        for i in other_indices:
-                            st.session_state.weights[i] = total_remaining / (len(tickers) - 1)
-            st.session_state.weights[changed_index] = new_value
+        # Обновление весов
+        def update_weights():
+            total_sum = sum(st.session_state.weights.values())
+            if total_sum != 1.0 and total_sum > 0:
+                for ticker in st.session_state.weights:
+                    st.session_state.weights[ticker] /= total_sum
 
-        for i, ticker in enumerate(tickers):
-            st.session_state.weights[i] = st.sidebar.slider(
+        for ticker in tickers:
+            st.session_state.weights[ticker] = st.sidebar.slider(
                 f"{ticker} ({ticker_to_name.get(ticker, 'N/A')})",
                 min_value=0.0,
                 max_value=1.0,
-                value=st.session_state.weights[i],
+                value=st.session_state.weights.get(ticker, 0.0),
                 step=0.01,
-                format="%.2f",
-                key=f"weight_{ticker}",
-                on_change=update_weights,
-                args=(i, st.session_state.weights[i])
+                format="%.2f"
             )
-        weights = st.session_state.weights
-
+        weights = list(st.session_state.weights.values())
+        update_weights()
+        st.sidebar.info(f"Сумма долей: **{sum(weights):.2f}**")
+    
     start_date = st.sidebar.date_input("Дата начала анализа", datetime.now() - timedelta(days=365))
     end_date = st.sidebar.date_input("Дата конца анализа", datetime.now())
 
@@ -127,7 +119,8 @@ if not securities_df.empty:
         # --- Блок 1: Ключевые показатели портфеля ---
         st.header("1. Эффективность портфеля")
         st.divider()
-        st.write("В данном разделе представлены основные метрики, которые оценивают историческую эффективность вашего портфеля. **Доходность** — общий прирост, а **Риск (Волатильность)** — степень колебаний стоимости.")
+        st.write("Этот раздел представляет **ключевые метрики** для оценки вашего портфеля. **Доходность** показывает, насколько выросла его стоимость, а **Риск (Волатильность)** — как сильно она колеблется.")
+        st.write("— **Коэффициент Шарпа** измеряет доходность на единицу риска: чем выше значение, тем лучше. \n— **Коэффициент Сортино** похож на Шарпа, но учитывает только риск падения, игнорируя положительные колебания. \n— **Бета** показывает, как ваш портфель движется по отношению к рынку (индексу МосБиржи): Бета > 1 означает, что портфель более волатилен, чем рынок.")
 
         returns = portfolio_df.pct_change().dropna()
         if returns.empty:
@@ -146,33 +139,28 @@ if not securities_df.empty:
         downside_volatility = downside_returns.std() * np.sqrt(252)
         sortino_ratio = total_return / downside_volatility if downside_volatility != 0 else 0
 
+        beta = np.nan
         if not imoex_df.empty and 'close' in imoex_df.columns:
             imoex_returns = imoex_df['close'].pct_change().dropna()
             aligned_returns = returns.join(imoex_returns, how='inner', lsuffix='_port', rsuffix='_imoex').dropna()
-            if not aligned_returns.empty:
+            if not aligned_returns.empty and len(aligned_returns) > 1:
                 portfolio_returns_aligned = aligned_returns[returns.columns].dot(valid_weights)
                 market_returns_aligned = aligned_returns['close']
-                if len(portfolio_returns_aligned) > 1 and len(market_returns_aligned) > 1:
-                    cov_matrix = np.cov(portfolio_returns_aligned, market_returns_aligned)
+                cov_matrix = np.cov(portfolio_returns_aligned, market_returns_aligned)
+                if cov_matrix[1, 1] != 0:
                     beta = cov_matrix[0, 1] / cov_matrix[1, 1]
-                else:
-                    beta = np.nan
-            else:
-                beta = np.nan
-        else:
-            beta = np.nan
-
+        
         col1, col2, col3, col4, col5 = st.columns(5, gap="large")
-        col1.metric("Доходность", f"{total_return:.2%}", help="Общий прирост стоимости портфеля за выбранный период.")
-        col2.metric("Риск (Волатильность)", f"{risk:.2%}", help="Показатель колебаний стоимости портфеля.")
-        col3.metric("Коэффициент Шарпа", f"{sharpe_ratio:.2f}", help="Оценка доходности на единицу риска.")
-        col4.metric("Коэффициент Сортино", f"{sortino_ratio:.2f}", help="Оценка доходности, учитывающая только риск падения.")
-        col5.metric("Бета", f"{beta:.2f}" if not np.isnan(beta) else "Недоступно", help="Волатильность портфеля относительно рынка.")
+        col1.metric("Доходность", f"{total_return:.2%}")
+        col2.metric("Риск (Волатильность)", f"{risk:.2%}")
+        col3.metric("Коэффициент Шарпа", f"{sharpe_ratio:.2f}")
+        col4.metric("Коэффициент Сортино", f"{sortino_ratio:.2f}")
+        col5.metric("Бета", f"{beta:.2f}" if not np.isnan(beta) else "Недоступно")
         
         # --- Блок 2: Динамика и сравнение с рынком ---
         st.header("2. Динамика и сравнение с индексом")
         st.divider()
-        st.write("График показывает, как стоимость вашего портфеля изменялась во времени по сравнению с рыночным индексом. Это позволяет оценить, насколько ваша стратегия эффективнее или рискованнее рынка.")
+        st.write("Этот график показывает, как стоимость вашего портфеля изменялась во времени по сравнению с рыночным индексом. Это ключевой показатель, который помогает понять, **опережает ли ваша стратегия рынок** или отстаёт от него.")
         
         cumulative = (1 + weighted_returns).cumprod()
         fig_cum = go.Figure(layout=go.Layout(template="plotly_white"))
@@ -195,7 +183,8 @@ if not securities_df.empty:
         if returns.shape[1] > 1:
             st.header("3. Оптимизация портфеля")
             st.divider()
-            st.write("На графике **'Граница эффективности'** показаны тысячи случайных портфелей. Задача оптимизации — найти портфель с лучшим соотношением доходности и риска. Звезда (*) показывает оптимальный портфель с максимальным коэффициентом Шарпа.")
+            st.write("На графике **'Граница эффективности'** показаны тысячи случайно сгенерированных портфелей. Цель оптимизации — найти портфель с лучшим соотношением доходности и риска.")
+            st.write("— **Случайные портфели** образуют 'облако'. \n— **Ваш портфель** — черная точка на этом графике. \n— **Оптимальный портфель** — это красная звезда (*). Это идеальная комбинация активов, которая даёт максимальную доходность при текущем уровне риска, или минимальный риск при текущей доходности.")
             
             num_portfolios = 5000
             all_weights_opt = np.zeros((num_portfolios, len(returns.columns)))
@@ -252,7 +241,7 @@ if not securities_df.empty:
             # --- Блок 4: Анализ корреляции ---
             st.header("4. Анализ корреляции активов")
             st.divider()
-            st.write("Корреляция показывает, как доходности ваших активов движутся относительно друг друга. **Низкая корреляция** — признак хорошей диверсификации, так как падение одного актива может компенсироваться ростом другого.")
+            st.write("Корреляция показывает, как доходности ваших активов движутся относительно друг друга. **Низкая корреляция** — это признак хорошей диверсификации, так как падение одного актива может компенсироваться ростом другого.")
             
             corr = returns.corr()
             fig_corr = px.imshow(
@@ -274,6 +263,12 @@ if not securities_df.empty:
         st.header("5. Прогноз и симуляция (Метод Монте-Карло)")
         st.divider()
         st.write("Метод **Монте-Карло** — это математическая модель, которая многократно симулирует тысячи возможных будущих сценариев на основе исторических данных. Это позволяет оценить не один конкретный результат, а **диапазон возможных исходов** и рассчитать потенциальные риски.")
+        st.write("Как это работает:")
+        st.markdown("""
+        1. **Исторические данные:** Модель анализирует вашу историческую доходность и волатильность.
+        2. **Случайные симуляции:** Затем она запускает тысячи симуляций. В каждой симуляции генерируется случайный ежедневный доход, который соответствует исторической волатильности.
+        3. **Диапазон результатов:** В итоге вы получаете не одну цифру, а распределение возможных будущих цен. Это помогает понять, какой результат наиболее вероятен, а какой — наихудший.
+        """)
         
         initial_investment = st.number_input("Начальная сумма инвестиций (в ₽):", min_value=1000, value=100000, step=1000, key="initial_investment")
         time_horizon = st.slider("Горизонт прогноза (в днях):", min_value=30, max_value=365, value=90, key="time_horizon")
@@ -319,7 +314,7 @@ if not securities_df.empty:
 
         st.header("6. Анализ устойчивости (Стресс-тест)")
         st.divider()
-        st.write("Стресс-тест позволяет оценить, как ваш портфель поведет себя в условиях **повышенной рыночной волатильности**. Мы удваиваем историческую волатильность, чтобы смоделировать кризисный сценарий.")
+        st.write("Стресс-тест позволяет оценить, как ваш портфель поведет себя в условиях **повышенной рыночной волатильности**, например, во время кризиса. Мы удваиваем историческую волатильность, чтобы смоделировать такой сценарий и понять, насколько ваш портфель устойчив к резким падениям.")
         
         volatility_factor = 2.0
         simulated_stress_prices = []
