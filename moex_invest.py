@@ -214,7 +214,7 @@ if not securities_df.empty:
             fig_opt = go.Figure(layout=go.Layout(template="plotly_dark"))
             fig_opt.add_trace(go.Scatter(
                 x=vol_arr, y=ret_arr, mode='markers',
-                marker=dict(color=sharpe_arr, colorscale='Reds', showscale=True, colorbar=dict(title="Коэфф. Шарпа")),
+                marker=dict(color=sharpe_arr, colorscale='Reds', showscale=True, colorbar=dict(title="Коэффициент Шарпа")),
                 name='Случайные портфели'))
             
             fig_opt.add_trace(go.Scatter(
