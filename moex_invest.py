@@ -107,7 +107,7 @@ if not securities_df.empty:
         # --- Блок 1: Ключевые показатели портфеля ---
         st.header("1. Эффективность портфеля")
         st.divider()
-        st.write("Здесь вы можете увидеть, насколько эффективен ваш портфель с точки зрения доходности и риска.")
+        st.write("Здесь вы можете увидеть, насколько эффективен ваш портфель с точки зрения доходности и риска. Метрики рассчитаны на основе исторических данных.")
 
         returns = portfolio_df.pct_change().dropna()
         if returns.empty:
@@ -119,15 +119,35 @@ if not securities_df.empty:
         risk = weighted_returns.std() * np.sqrt(252)
         sharpe_ratio = total_return / risk if risk != 0 else 0
         
-        col1, col2, col3 = st.columns(3, gap="large")
-        col1.metric("Доходность", f"{total_return:.2%}", help="Общий прирост стоимости портфеля за период.")
+        # Расчет коэффициента Сортино и Беты
+        downside_returns = weighted_returns[weighted_returns < 0]
+        downside_volatility = downside_returns.std() * np.sqrt(252)
+        sortino_ratio = total_return / downside_volatility if downside_volatility != 0 else 0
+
+        if not imoex_df.empty and 'close' in imoex_df.columns:
+            imoex_returns = imoex_df['close'].pct_change().dropna()
+            aligned_returns = returns.join(imoex_returns, how='inner', lsuffix='_port', rsuffix='_imoex').dropna()
+            portfolio_returns_aligned = aligned_returns[tickers].dot(weights)
+            market_returns_aligned = aligned_returns['close']
+            if len(portfolio_returns_aligned) > 1 and len(market_returns_aligned) > 1:
+                cov_matrix = np.cov(portfolio_returns_aligned, market_returns_aligned)
+                beta = cov_matrix[0, 1] / cov_matrix[1, 1]
+            else:
+                beta = np.nan
+        else:
+            beta = np.nan
+
+        col1, col2, col3, col4, col5 = st.columns(5, gap="large")
+        col1.metric("Доходность", f"{total_return:.2%}", help="Общий прирост стоимости портфеля за выбранный период.")
         col2.metric("Риск (Волатильность)", f"{risk:.2%}", help="Показатель колебаний стоимости портфеля.")
-        col3.metric("Коэффициент Шарпа", f"{sharpe_ratio:.2f}", help="Доходность на единицу риска. Чем выше, тем лучше.")
+        col3.metric("Коэффициент Шарпа", f"{sharpe_ratio:.2f}", help="Оценка доходности на единицу риска.")
+        col4.metric("Коэффициент Сортино", f"{sortino_ratio:.2f}", help="Оценка доходности, учитывающая только риск падения.")
+        col5.metric("Бета", f"{beta:.2f}" if not np.isnan(beta) else "Недоступно", help="Волатильность портфеля относительно рынка.")
         
         # --- Блок 2: Динамика и сравнение с рынком ---
         st.header("2. Динамика и сравнение с индексом")
         st.divider()
-        st.write("График показывает, как стоимость вашего портфеля изменялась во времени по сравнению с рыночным индексом IMOEX.")
+        st.write("График показывает, как стоимость вашего портфеля изменялась во времени по сравнению с рыночным индексом IMOEX. Это позволяет оценить, насколько ваша стратегия эффективнее или рискованнее рынка.")
         
         cumulative = (1 + weighted_returns).cumprod()
         fig_cum = go.Figure(layout=go.Layout(template="plotly_white"))
@@ -203,9 +223,30 @@ if not securities_df.empty:
                 'Вес': [f"{w:.2%}" for w in max_sharpe_weights]
             })
             st.dataframe(optimal_weights_df, hide_index=True)
+            
+            # --- Новый блок: Анализ корреляции ---
+            st.header("4. Анализ корреляции активов")
+            st.divider()
+            st.write("Корреляция показывает, как доходности ваших активов движутся относительно друг друга. Низкая корреляция — признак хорошей диверсификации.")
+            
+            corr = returns.corr()
+            fig_corr = px.imshow(
+                corr, text_auto=True, color_continuous_scale=[(0, COLOR_SECONDARY), (0.5, "white"), (1, COLOR_PRIMARY)],
+                aspect="auto", title="Матрица корреляции доходностей", template="plotly_white"
+            )
+            fig_corr.update_layout(xaxis_title="Активы", yaxis_title="Активы")
+            st.plotly_chart(fig_corr, use_container_width=True)
+
+            st.subheader("Выводы по корреляции")
+            if corr.min().min() > 0.5:
+                st.warning("**Сильная корреляция.** Активы вашего портфеля движутся в одном направлении. Это означает, что портфель может быть менее устойчив к падениям, так как все активы могут падать одновременно.")
+            elif corr.max().max() < 0.2:
+                st.success("**Низкая корреляция.** Ваши активы слабо коррелируют или имеют отрицательную корреляцию, что является признаком хорошей диверсификации. Это снижает общий риск портфеля, так как падение одного актива может компенсироваться ростом другого.")
+            else:
+                st.info("**Умеренная корреляция.** Портфель обладает умеренной диверсификацией. Это обеспечивает баланс между риском и доходностью.")
 
         # --- Блок 4: Прогнозирование и симуляция ---
-        st.header("4. Прогноз и симуляция")
+        st.header("5. Прогноз и симуляция")
         st.divider()
         st.write("С помощью симуляции Монте-Карло мы можем спрогнозировать возможные исходы для вашего портфеля на заданный период. Это поможет оценить потенциальный доход и риски.")
         
@@ -250,3 +291,42 @@ if not securities_df.empty:
             bargap=0.1
         )
         st.plotly_chart(fig_sim, use_container_width=True)
+
+        st.header("6. Анализ устойчивости (Стресс-тест)")
+        st.divider()
+        st.write("Оценка поведения портфеля в условиях повышенной рыночной волатильности.")
+        
+        volatility_factor = 2.0
+        simulated_stress_prices = []
+        stress_std_dev = std_dev * volatility_factor
+
+        for x in range(num_simulations):
+            future_portfolio_value = initial_investment
+            for day in range(time_horizon):
+                daily_return = np.random.normal(mean_returns, stress_std_dev)
+                future_portfolio_value *= (1 + daily_return)
+            simulated_stress_prices.append(future_portfolio_value)
+        simulated_stress_prices = np.array(simulated_stress_prices)
+
+        mean_stress_price = np.mean(simulated_stress_prices)
+        var_stress = np.percentile(simulated_stress_prices, 100 * (1 - confidence_level_var))
+
+        fig_stress = go.Figure(layout=go.Layout(template="plotly_white"))
+        fig_stress.add_trace(go.Histogram(x=simulated_end_prices, nbinsx=50, name="Нормальный сценарий", marker_color=COLOR_PRIMARY, opacity=0.7))
+        fig_stress.add_trace(go.Histogram(x=simulated_stress_prices, nbinsx=50, name="Стресс-сценарий (волатильность x2)", marker_color=COLOR_SECONDARY, opacity=0.7))
+        fig_stress.update_layout(
+            barmode='overlay',
+            title=f"Сравнение распределения стоимости (Нормальный vs Стресс-сценарий)",
+            xaxis_title="Стоимость портфеля (₽)",
+            yaxis_title="Количество симуляций",
+            bargap=0.1,
+            legend_title_text='Сценарий'
+        )
+        st.plotly_chart(fig_stress, use_container_width=True)
+
+        st.subheader("Выводы по стресс-тесту")
+        col_stress1, col_stress2 = st.columns(2)
+        col_stress1.metric("Средний результат (Стресс)", f"{mean_stress_price:,.2f} ₽", delta=f"{mean_stress_price - mean_end_price:,.2f} ₽")
+        col_stress2.metric("95% VaR (Стресс)", f"{var_stress:,.2f} ₽", delta=f"{var_stress - var_value:,.2f} ₽")
+        
+        st.info("Результаты стресс-теста показывают, насколько ваш портфель устойчив к рыночным потрясениям. В условиях повышенной волатильности потенциальные убытки значительно возрастают.")
