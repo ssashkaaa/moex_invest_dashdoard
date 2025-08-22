@@ -112,7 +112,7 @@ if not securities_df.empty:
             st.error("Недостаточно данных для выбранных акций или периода. Пожалуйста, измените выбор.")
             st.stop()
         
-        imoex_df = get_history('IMOEX', start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'), board='IME') #загружаем данные по IMOEX - для сравнения с выбранным пользователем инвестиционным портфелем
+        imoex_df = get_history('IMOEX', start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d')) #загружаем данные по IMOEX - для сравнения с выбранным пользователем инвестиционным портфелем
         
 
         # Ключевые показатели портфеля
