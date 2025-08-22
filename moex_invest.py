@@ -57,32 +57,49 @@ securities_df = get_securities()
 
 if not securities_df.empty:
     st.sidebar.header("Параметры симуляции")
+    # Создаем словарь для отображения полного названия
+    ticker_to_name = dict(zip(securities_df['SECID'], securities_df['SHORTNAME']))
+    
     tickers = st.sidebar.multiselect(
         "Выберите акции для портфеля (до 5)",
-        securities_df['SECID'],
-        default=securities_df['SECID'][:2] if not securities_df.empty else []
+        options=list(ticker_to_name.keys()),
+        format_func=lambda x: f"{x} ({ticker_to_name.get(x, 'N/A')})",
+        default=securities_df['SECID'][:2].tolist() if not securities_df.empty else []
     )
-
-    weights = []
-    st.sidebar.write("Задайте доли для каждой акции (сумма должна быть 1.0):")
-    cols = st.sidebar.columns(len(tickers) if tickers else 1)
     
+    weights = []
     if tickers:
-        for i, ticker in enumerate(tickers):
-            with cols[i]:
-                weight = st.number_input(
-                    f"{ticker}:",
-                    min_value=0.0,
-                    max_value=1.0,
-                    value=1.0/len(tickers) if tickers else 0.0,
-                    step=0.01,
-                    key=f"weight_{ticker}"
-                )
-                weights.append(weight)
+        st.sidebar.write("Задайте доли для каждой акции:")
+        if 'weights' not in st.session_state or len(st.session_state.weights) != len(tickers):
+            st.session_state.weights = [1.0 / len(tickers)] * len(tickers)
 
-    if tickers and (abs(sum(weights) - 1.0) > 0.01):
-        st.sidebar.warning(f"Сумма долей должна быть равна 1.0. Текущая сумма: {sum(weights):.2f}")
-        st.stop()
+        def update_weights(changed_index, new_value):
+            total_remaining = 1.0 - new_value
+            if len(tickers) > 1 and total_remaining >= 0:
+                other_indices = [i for i in range(len(tickers)) if i != changed_index]
+                if other_indices:
+                    current_sum_others = sum(st.session_state.weights[i] for i in other_indices)
+                    if current_sum_others > 0:
+                        for i in other_indices:
+                            st.session_state.weights[i] = st.session_state.weights[i] / current_sum_others * total_remaining
+                    else:
+                        for i in other_indices:
+                            st.session_state.weights[i] = total_remaining / (len(tickers) - 1)
+            st.session_state.weights[changed_index] = new_value
+
+        for i, ticker in enumerate(tickers):
+            st.session_state.weights[i] = st.sidebar.slider(
+                f"{ticker} ({ticker_to_name.get(ticker, 'N/A')})",
+                min_value=0.0,
+                max_value=1.0,
+                value=st.session_state.weights[i],
+                step=0.01,
+                format="%.2f",
+                key=f"weight_{ticker}",
+                on_change=update_weights,
+                args=(i, st.session_state.weights[i])
+            )
+        weights = st.session_state.weights
 
     start_date = st.sidebar.date_input("Дата начала анализа", datetime.now() - timedelta(days=365))
     end_date = st.sidebar.date_input("Дата конца анализа", datetime.now())
@@ -98,6 +115,9 @@ if not securities_df.empty:
             if not df.empty:
                 portfolio_df[ticker] = df['close']
         
+        portfolio_df = portfolio_df.dropna(axis=1, how='all')
+        valid_tickers = portfolio_df.columns.tolist()
+        
         if portfolio_df.empty or len(portfolio_df) < 2:
             st.error("Недостаточно данных для выбранных акций или периода. Пожалуйста, измените выбор.")
             st.stop()
@@ -107,19 +127,21 @@ if not securities_df.empty:
         # --- Блок 1: Ключевые показатели портфеля ---
         st.header("1. Эффективность портфеля")
         st.divider()
-        st.write("Здесь вы можете увидеть, насколько эффективен ваш портфель с точки зрения доходности и риска. Метрики рассчитаны на основе исторических данных.")
+        st.write("В данном разделе представлены основные метрики, которые оценивают историческую эффективность вашего портфеля. **Доходность** — общий прирост, а **Риск (Волатильность)** — степень колебаний стоимости.")
 
         returns = portfolio_df.pct_change().dropna()
         if returns.empty:
             st.warning("Недостаточно данных для расчета доходности.")
             st.stop()
 
-        weighted_returns = returns.dot(weights)
+        valid_weights = [weights[tickers.index(t)] for t in valid_tickers]
+        valid_weights = np.array(valid_weights) / sum(valid_weights)
+
+        weighted_returns = returns.dot(valid_weights)
         total_return = (1 + weighted_returns).prod() - 1
         risk = weighted_returns.std() * np.sqrt(252)
         sharpe_ratio = total_return / risk if risk != 0 else 0
         
-        # Расчет коэффициента Сортино и Беты
         downside_returns = weighted_returns[weighted_returns < 0]
         downside_volatility = downside_returns.std() * np.sqrt(252)
         sortino_ratio = total_return / downside_volatility if downside_volatility != 0 else 0
@@ -127,11 +149,14 @@ if not securities_df.empty:
         if not imoex_df.empty and 'close' in imoex_df.columns:
             imoex_returns = imoex_df['close'].pct_change().dropna()
             aligned_returns = returns.join(imoex_returns, how='inner', lsuffix='_port', rsuffix='_imoex').dropna()
-            portfolio_returns_aligned = aligned_returns[tickers].dot(weights)
-            market_returns_aligned = aligned_returns['close']
-            if len(portfolio_returns_aligned) > 1 and len(market_returns_aligned) > 1:
-                cov_matrix = np.cov(portfolio_returns_aligned, market_returns_aligned)
-                beta = cov_matrix[0, 1] / cov_matrix[1, 1]
+            if not aligned_returns.empty:
+                portfolio_returns_aligned = aligned_returns[returns.columns].dot(valid_weights)
+                market_returns_aligned = aligned_returns['close']
+                if len(portfolio_returns_aligned) > 1 and len(market_returns_aligned) > 1:
+                    cov_matrix = np.cov(portfolio_returns_aligned, market_returns_aligned)
+                    beta = cov_matrix[0, 1] / cov_matrix[1, 1]
+                else:
+                    beta = np.nan
             else:
                 beta = np.nan
         else:
@@ -147,7 +172,7 @@ if not securities_df.empty:
         # --- Блок 2: Динамика и сравнение с рынком ---
         st.header("2. Динамика и сравнение с индексом")
         st.divider()
-        st.write("График показывает, как стоимость вашего портфеля изменялась во времени по сравнению с рыночным индексом IMOEX. Это позволяет оценить, насколько ваша стратегия эффективнее или рискованнее рынка.")
+        st.write("График показывает, как стоимость вашего портфеля изменялась во времени по сравнению с рыночным индексом. Это позволяет оценить, насколько ваша стратегия эффективнее или рискованнее рынка.")
         
         cumulative = (1 + weighted_returns).cumprod()
         fig_cum = go.Figure(layout=go.Layout(template="plotly_white"))
@@ -170,18 +195,18 @@ if not securities_df.empty:
         if returns.shape[1] > 1:
             st.header("3. Оптимизация портфеля")
             st.divider()
-            st.write("На графике 'Граница эффективности' показаны тысячи случайных портфелей. Вы можете найти оптимальный портфель с лучшим соотношением риска и доходности.")
+            st.write("На графике **'Граница эффективности'** показаны тысячи случайных портфелей. Задача оптимизации — найти портфель с лучшим соотношением доходности и риска. Звезда (*) показывает оптимальный портфель с максимальным коэффициентом Шарпа.")
             
             num_portfolios = 5000
-            all_weights = np.zeros((num_portfolios, len(tickers)))
+            all_weights_opt = np.zeros((num_portfolios, len(returns.columns)))
             ret_arr = np.zeros(num_portfolios)
             vol_arr = np.zeros(num_portfolios)
             sharpe_arr = np.zeros(num_portfolios)
             
             for x in range(num_portfolios):
-                weights_rand = np.array(np.random.random(len(tickers)))
+                weights_rand = np.array(np.random.random(len(returns.columns)))
                 weights_rand /= np.sum(weights_rand)
-                all_weights[x, :] = weights_rand
+                all_weights_opt[x, :] = weights_rand
                 port_return = np.sum((returns.mean() * weights_rand) * 252)
                 cov_matrix = returns.cov() * 252
                 port_volatility = np.sqrt(np.dot(weights_rand.T, np.dot(cov_matrix, weights_rand)))
@@ -192,7 +217,7 @@ if not securities_df.empty:
             max_sharpe_idx = sharpe_arr.argmax()
             max_sharpe_port_ret = ret_arr[max_sharpe_idx]
             max_sharpe_port_vol = vol_arr[max_sharpe_idx]
-            max_sharpe_weights = all_weights[max_sharpe_idx, :]
+            max_sharpe_weights = all_weights_opt[max_sharpe_idx, :]
 
             fig_opt = go.Figure(layout=go.Layout(template="plotly_white"))
             fig_opt.add_trace(go.Scatter(
@@ -219,15 +244,15 @@ if not securities_df.empty:
             
             st.subheader("Рекомендации по весам")
             optimal_weights_df = pd.DataFrame({
-                'Акция': tickers,
+                'Акция': returns.columns,
                 'Вес': [f"{w:.2%}" for w in max_sharpe_weights]
             })
             st.dataframe(optimal_weights_df, hide_index=True)
             
-            # --- Новый блок: Анализ корреляции ---
+            # --- Блок 4: Анализ корреляции ---
             st.header("4. Анализ корреляции активов")
             st.divider()
-            st.write("Корреляция показывает, как доходности ваших активов движутся относительно друг друга. Низкая корреляция — признак хорошей диверсификации.")
+            st.write("Корреляция показывает, как доходности ваших активов движутся относительно друг друга. **Низкая корреляция** — признак хорошей диверсификации, так как падение одного актива может компенсироваться ростом другого.")
             
             corr = returns.corr()
             fig_corr = px.imshow(
@@ -245,10 +270,10 @@ if not securities_df.empty:
             else:
                 st.info("**Умеренная корреляция.** Портфель обладает умеренной диверсификацией. Это обеспечивает баланс между риском и доходностью.")
 
-        # --- Блок 4: Прогнозирование и симуляция ---
-        st.header("5. Прогноз и симуляция")
+        # --- Блок 5: Прогнозирование и симуляция ---
+        st.header("5. Прогноз и симуляция (Метод Монте-Карло)")
         st.divider()
-        st.write("С помощью симуляции Монте-Карло мы можем спрогнозировать возможные исходы для вашего портфеля на заданный период. Это поможет оценить потенциальный доход и риски.")
+        st.write("Метод **Монте-Карло** — это математическая модель, которая многократно симулирует тысячи возможных будущих сценариев на основе исторических данных. Это позволяет оценить не один конкретный результат, а **диапазон возможных исходов** и рассчитать потенциальные риски.")
         
         initial_investment = st.number_input("Начальная сумма инвестиций (в ₽):", min_value=1000, value=100000, step=1000, key="initial_investment")
         time_horizon = st.slider("Горизонт прогноза (в днях):", min_value=30, max_value=365, value=90, key="time_horizon")
@@ -294,7 +319,7 @@ if not securities_df.empty:
 
         st.header("6. Анализ устойчивости (Стресс-тест)")
         st.divider()
-        st.write("Оценка поведения портфеля в условиях повышенной рыночной волатильности.")
+        st.write("Стресс-тест позволяет оценить, как ваш портфель поведет себя в условиях **повышенной рыночной волатильности**. Мы удваиваем историческую волатильность, чтобы смоделировать кризисный сценарий.")
         
         volatility_factor = 2.0
         simulated_stress_prices = []
