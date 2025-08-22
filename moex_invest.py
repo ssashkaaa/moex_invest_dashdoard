@@ -39,18 +39,22 @@ def get_securities(): #функция, которая загружает спи�
 
 
 @st.cache_data(ttl=3600)
-def get_history(ticker, start, end, board='TQBR'): #функция для получения исторических данных по конкретной акции за указанный период
+def get_history(ticker, start, end): #функция для получения исторических данных по конкретной акции за указанный период
     with requests.Session() as session:
         try:
-            data = apimoex.get_market_candles(session, security=ticker, interval=24, start=start, end=end) #дневные свечи
+            if ticker == "IMOEX":
+                data = apimoex.get_market_candles(session, security=ticker, market="index", engine="stock", interval=24, start=start, end=end)
+            else:
+                data = apimoex.get_market_candles(session, security=ticker, interval=24, start=start, end=end)
             df = pd.DataFrame(data)
             if not df.empty:
                 df['begin'] = pd.to_datetime(df['begin'])
-                df.set_index('begin', inplace=True)
-            return df #dataframe с историей цен акций
+                df.set_index('begin', inplace=True) 
+            return df
         except Exception as e:
-            st.warning(f"Ошибка при загрузке данных для акций {ticker}: {e}") #формально для тикера
+            st.warning(f"Ошибка при загрузке данных для {ticker}: {e}")#формально для тикера
             return pd.DataFrame()
+        
 
 securities_df = get_securities() #получаем список тикеров и работаем с ним, если он не пустой
 if not securities_df.empty:
